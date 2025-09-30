@@ -1,0 +1,8 @@
+streamlit
+gTTS
+openai==0.28
+sqlalchemy
+python-docx
+pyodbc
+numpy
+psycopg2-binary
