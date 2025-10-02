@@ -164,7 +164,7 @@ Ejemplo de Prompt: Cuáles son los temas que se incluyen en el ebook<br>
 """, unsafe_allow_html=True)
 
 # --------------------------
-# --- MODO NORMAL ---
+# --- MODO NORMAL PREGUNTAS
 # --------------------------
 if st.session_state.modo == "normal":
     st.markdown("""
