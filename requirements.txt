@@ -15,7 +15,7 @@ openai==0.28.0
 
 # Base de datos
 sqlalchemy==2.0.20
-pyodbc==4.0.40
+
 
 # Manejo de documentos Word
 python-docx==0.8.12
