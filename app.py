@@ -294,6 +294,10 @@ Separa títulos y subtítulos claramente.
     # Generar capítulos
     elif estado["paso"] == "generar_todos_capitulos":
         st.info("Generando todos los capítulos, esto puede tardar un poco...")
+
+        # 🔧 FIX: limpiar capítulos anteriores y dejar solo el índice
+        estado["contenido"] = [item for item in estado["contenido"] if item["tipo"] == "indice"]
+
         indice = next((item['texto'] for item in estado["contenido"] if item['tipo'] == 'indice'), "")
         for i in range(1, estado["datos"]["capitulos"] + 1):
             prompt_cap = f"""
