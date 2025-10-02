@@ -18,7 +18,7 @@ sqlalchemy==2.0.20
 
 
 # Manejo de documentos Word
-python-docx==0.8.12
+python-docx==0.8.11
 
 # Librerías de utilidad
 numpy==1.26.0
