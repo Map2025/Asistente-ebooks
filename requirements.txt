@@ -2,6 +2,7 @@ pip>=25.2
 setuptools>=68.0
 wheel
 
+psycopg2-binary==2.9.8
 
 # Streamlit para la app web
 streamlit==1.28.0
@@ -14,7 +15,6 @@ openai==0.28.0
 
 # Base de datos
 sqlalchemy==2.0.20
-psycopg2-binary==2.9.8
 pyodbc==4.0.40
 
 # Manejo de documentos Word
