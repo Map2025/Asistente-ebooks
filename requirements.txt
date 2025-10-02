@@ -1,8 +1,25 @@
+# Streamlit para la app web
 streamlit==1.28.0
-gTTS
-openai==0.28
-sqlalchemy
-python-docx
-pyodbc
-numpy
-psycopg2-binary
+
+# Texto a voz
+gTTS==2.3.2
+
+# OpenAI API
+openai==0.28.0
+
+# Base de datos
+sqlalchemy==2.0.20
+psycopg2-binary==2.9.8
+pyodbc==4.0.40
+
+# Manejo de documentos Word
+python-docx==0.8.12
+
+# Librerías de utilidad
+numpy==1.26.0
+pandas==2.1.0
+
+# Cookies persistentes para Streamlit
+streamlit-cookies-manager==0.5.0
+
+pyarrow

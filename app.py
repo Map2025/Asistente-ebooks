@@ -1,23 +1,97 @@
 import streamlit as st
+import uuid
+import psycopg2
+import psycopg2.extras
+import pandas as pd
 from services.openai_service import generar_texto_openai, generar_embedding
 from services.db_service import obtener_ebooks_disponibles, buscar_fragmentos
 from services.ebook_service import crear_docx
 from services.tts_service import reproducir_audio
 from utils.helpers import limpiar_estado
+from streamlit_cookies_manager import EncryptedCookieManager
 
 st.set_page_config(page_title="Asistente Inteligente ebooks de IA", layout="centered")
 
-# Estilos
-st.markdown("""
-<style>
-body {background-color: #000; color: #fff;}
-.titulo {color: #f00; font-size: 32px; font-weight: bold; text-align: center; margin-bottom: 30px;}
-.chat-burbuja {background-color: #f2f2f2; border: 1px solid #f00; padding: 15px; border-radius: 10px; margin-top: 20px; color:#000;}
-.boton-rojo button {background-color: #f00 !important; color: white !important; font-weight: bold; border-radius: 8px; margin-top: 20px;}
-</style>
-""", unsafe_allow_html=True)
+# --------------------------
+# Configuración cookies para user_id persistente
+# --------------------------
+cookies = EncryptedCookieManager(prefix="ebooks_app_", password="clave-secreta-larga")
+if not cookies.ready():
+    st.stop()
 
-# Estados iniciales
+if "user_id" not in cookies:
+    cookies["user_id"] = str(uuid.uuid4())
+    cookies.save()
+
+user_id = cookies["user_id"]
+
+# --------------------------
+# Conexión a Postgres usando DATABASE_URL y cacheando recurso
+# --------------------------
+@st.cache_resource
+def init_connection():
+    db = st.secrets["database"]
+    return psycopg2.connect(
+        dbname=db["name"],
+        user=db["user"],
+        password=db["password"],
+        host=db["host"],
+        port=db["port"],
+        sslmode=db["sslmode"]
+    )
+
+conn = init_connection()
+# --------------------------
+# Funciones de control de créditos
+# --------------------------
+@st.cache_data
+def get_or_create_user(user_id: str):
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        cur.execute("SELECT user_id, credits FROM users WHERE user_id = %s", (user_id,))
+        row = cur.fetchone()
+        if row:
+            return row["user_id"], row["credits"]
+        else:
+            cur.execute(
+                "INSERT INTO users (user_id, credits) VALUES (%s, %s) RETURNING user_id, credits",
+                (user_id, 20)
+            )
+            conn.commit()
+            return cur.fetchone()
+
+def update_credits(user_id: str, amount: int, action_type: str):
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        cur.execute("""
+            UPDATE users SET credits = credits - %s
+            WHERE user_id = %s AND credits >= %s
+            RETURNING credits
+        """, (amount, user_id, amount))
+        row = cur.fetchone()
+        if row:
+            new_credits = row["credits"]
+            cur.execute("""
+                INSERT INTO credit_transactions (user_id, action_type, amount)
+                VALUES (%s, %s, %s)
+            """, (user_id, action_type, -amount))
+            conn.commit()
+            return new_credits
+        else:
+            return None
+
+@st.cache_data
+def get_transaction_history(user_id: str):
+    query = """
+        SELECT created_at, action_type, amount
+        FROM credit_transactions
+        WHERE user_id = %s
+        ORDER BY created_at DESC
+        LIMIT 50
+    """
+    return pd.read_sql(query, conn, params=(user_id,))
+
+# --------------------------
+# Inicialización de estados
+# --------------------------
 if "respuesta" not in st.session_state:
     st.session_state.respuesta = ""
 if "modo" not in st.session_state:
@@ -33,7 +107,29 @@ if "ebook_estado" not in st.session_state:
 
 pregunta_key = "pregunta_input"
 
+# --------------------------
+# Obtener saldo actual
+# --------------------------
+user_id, credits = get_or_create_user(user_id)
+if "credits" not in st.session_state:
+    st.session_state["credits"] = credits
+st.sidebar.metric("💰 Créditos disponibles", st.session_state["credits"])
+
+# --------------------------
+# Estilos
+# --------------------------
+st.markdown("""
+<style>
+body {background-color: #000; color: #fff;}
+.titulo {color: #f00; font-size: 32px; font-weight: bold; text-align: center; margin-bottom: 30px;}
+.chat-burbuja {background-color: #f2f2f2; border: 1px solid #f00; padding: 15px; border-radius: 10px; margin-top: 20px; color:#000;}
+.boton-rojo button {background-color: #f00 !important; color: white !important; font-weight: bold; border-radius: 8px; margin-top: 20px;}
+</style>
+""", unsafe_allow_html=True)
+
+# --------------------------
 # Selección de ebook
+# --------------------------
 ebooks = obtener_ebooks_disponibles()
 if not ebooks:
     st.warning("No hay ebooks disponibles.")
@@ -56,7 +152,9 @@ st.markdown(f'''
     ">🛒 Ir a la Tienda</a>
 ''', unsafe_allow_html=True)
 
+# --------------------------
 # Instrucciones
+# --------------------------
 st.markdown("""
 <div style="background-color:#222; padding:15px; border-radius:8px; margin-bottom:20px; color:#ddd;">
 <b>Cómo usar este asistente:</b><br>
@@ -65,7 +163,9 @@ Ejemplo de Prompt: Cuáles son los temas que se incluyen en el ebook<br>
 </div>
 """, unsafe_allow_html=True)
 
+# --------------------------
 # --- MODO NORMAL ---
+# --------------------------
 if st.session_state.modo == "normal":
     st.markdown("""
     <div style="background-color:#222; padding:10px; border-radius:8px; margin-bottom:15px; color:#ddd; font-weight:bold;">
@@ -87,13 +187,20 @@ if st.session_state.modo == "normal":
             st.session_state.modo = "ebook"
             st.rerun()
         else:
-            with st.spinner("🧠 Pensando..."):
-                try:
-                    embedding = generar_embedding(pregunta)
-                    embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
-                    fragmentos = buscar_fragmentos(ebook_seleccionado, embedding_str)
-                    contexto = "\n\n".join(fragmentos)
-                    prompt = f"""Eres un asistente experto en ebooks técnicos.
+            credit_cost = 1
+            nuevo_balance = update_credits(user_id, credit_cost, "pregunta")
+            if nuevo_balance is None:
+                st.error("❌ No tienes créditos suficientes para hacer esta pregunta.")
+            else:
+                st.session_state["credits"] = nuevo_balance
+                st.sidebar.metric("💰 Créditos disponibles", st.session_state["credits"])
+                with st.spinner("🧠 Pensando..."):
+                    try:
+                        embedding = generar_embedding(pregunta)
+                        embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
+                        fragmentos = buscar_fragmentos(ebook_seleccionado, embedding_str)
+                        contexto = "\n\n".join(fragmentos)
+                        prompt = f"""Eres un asistente experto en ebooks técnicos.
 Usa este contexto para responder la pregunta claramente:
 
 Contexto:
@@ -102,9 +209,9 @@ Contexto:
 Pregunta:
 {pregunta}
 """
-                    st.session_state.respuesta = generar_texto_openai(prompt, model="gpt-4", max_tokens=500)
-                except Exception as e:
-                    st.session_state.respuesta = f"❌ Error: {e}"
+                        st.session_state.respuesta = generar_texto_openai(prompt, model="gpt-4", max_tokens=500)
+                    except Exception as e:
+                        st.session_state.respuesta = f"❌ Error: {e}"
 
     if st.session_state.respuesta:
         st.markdown(f'<div class="chat-burbuja">{st.session_state.respuesta}</div>', unsafe_allow_html=True)
@@ -113,25 +220,28 @@ Pregunta:
         if st.button("🔊 Escuchar respuesta"):
             reproducir_audio(st.session_state.respuesta)
 
+# --------------------------
 # --- MODO EBOOK ---
+# --------------------------
 elif st.session_state.modo == "ebook":
     estado = st.session_state.ebook_estado
-    paso = estado["paso"]
 
     def avanzar_ebook(respuesta):
-        if paso == "pedir_titulo":
+        current_paso = estado["paso"]
+
+        if current_paso == "pedir_titulo":
             estado["datos"]["titulo"] = respuesta
             estado["paso"] = "pedir_tema"
-        elif paso == "pedir_tema":
+        elif current_paso == "pedir_tema":
             estado["datos"]["tema"] = respuesta
             estado["paso"] = "pedir_publico"
-        elif paso == "pedir_publico":
+        elif current_paso == "pedir_publico":
             estado["datos"]["publico"] = respuesta
             estado["paso"] = "pedir_tono"
-        elif paso == "pedir_tono":
+        elif current_paso == "pedir_tono":
             estado["datos"]["tono"] = respuesta
             estado["paso"] = "pedir_cantidad_capitulos"
-        elif paso == "pedir_cantidad_capitulos":
+        elif current_paso == "pedir_cantidad_capitulos":
             try:
                 capitulos = int(respuesta)
                 if capitulos < 1:
@@ -141,14 +251,22 @@ elif st.session_state.modo == "ebook":
                 estado["paso"] = "generar_indice"
             except:
                 st.warning("Ingresa un número válido.")
-        elif paso == "confirmar_indice":
+        elif current_paso == "confirmar_indice":
             if respuesta.lower() in ["sí", "si", "s"]:
-                estado["paso"] = "generar_todos_capitulos"
+                total_cost = 5 * estado["datos"]["capitulos"]
+                nuevo_balance = update_credits(user_id, total_cost, "generar_ebook")
+                if nuevo_balance is None:
+                    st.error("❌ No tienes créditos suficientes para generar el ebook completo.")
+                    return
+                else:
+                    st.session_state["credits"] = nuevo_balance
+                    st.sidebar.metric("💰 Créditos disponibles", st.session_state["credits"])
+                    estado["paso"] = "generar_todos_capitulos"
             elif respuesta.lower() in ["no", "n"]:
                 estado["paso"] = "pedir_cantidad_capitulos"
             else:
                 st.warning("Responde sí o no.")
-        elif paso == "finalizar":
+        elif current_paso == "finalizar":
             if respuesta.lower() in ["sí", "si", "s"]:
                 archivo = crear_docx(estado["contenido"], estado["datos"]["titulo"])
                 estado["archivo_creado"] = True
@@ -158,7 +276,8 @@ elif st.session_state.modo == "ebook":
                 st.info("Proceso finalizado sin crear archivo.")
                 estado["paso"] = "completo"
 
-    if paso == "generar_indice":
+    # Generar índice
+    if estado["paso"] == "generar_indice":
         st.info("Generando índice, por favor esperá...")
         prompt_indice = f"""
 Crea un índice para un ebook titulado '{estado['datos']['titulo']}', 
@@ -172,7 +291,8 @@ Separa títulos y subtítulos claramente.
         estado["paso"] = "confirmar_indice"
         st.rerun()
 
-    elif paso == "generar_todos_capitulos":
+    # Generar capítulos
+    elif estado["paso"] == "generar_todos_capitulos":
         st.info("Generando todos los capítulos, esto puede tardar un poco...")
         indice = next((item['texto'] for item in estado["contenido"] if item['tipo'] == 'indice'), "")
         for i in range(1, estado["datos"]["capitulos"] + 1):
@@ -192,6 +312,7 @@ Desarrolla el capítulo con subtítulos y ejemplos. Extensión mínima: 800 pala
         estado["paso"] = "finalizar"
         st.rerun()
 
+    # Entrada de usuario para cada paso del ebook
     else:
         pregunta_ebook = {
             "pedir_titulo": "¿Cuál será el título del ebook?",
@@ -203,19 +324,17 @@ Desarrolla el capítulo con subtítulos y ejemplos. Extensión mínima: 800 pala
             "finalizar": "¿Querés que cree el archivo DOCX para descargar? (sí/no)",
             "completo": "Proceso finalizado. Recargá la página para crear otro ebook."
         }
-        prompt = pregunta_ebook.get(paso)
+        prompt = pregunta_ebook.get(estado["paso"])
         if prompt:
             respuesta = st.text_input(prompt, key="input_ebook")
-            if paso == "pedir_titulo":
-                if st.button("Cancelar creación de ebook"):
-                    limpiar_estado()
-                    st.rerun()
+            if estado["paso"] == "pedir_titulo" and st.button("Cancelar creación de ebook"):
+                limpiar_estado()
+                st.rerun()
             if respuesta:
                 avanzar_ebook(respuesta)
                 st.rerun()
-        else:
-            st.write("Esperando...")
 
+    # Descargar ebook
     if estado.get("archivo_creado"):
         with open("ebook_generado.docx", "rb") as f:
             st.download_button(
