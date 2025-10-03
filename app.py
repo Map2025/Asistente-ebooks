@@ -44,7 +44,7 @@ conn = init_connection()
 # Funciones de control de créditos
 # --------------------------
 @st.cache_data
-def get_or_create_user(email: str, conn):
+def get_or_create_user(email: str, _conn):
     """
     Busca un usuario por email. Si no existe, crea uno nuevo con user_id tipo UUID.
     Devuelve: (user_id, credits)
