@@ -46,17 +46,25 @@ conn = init_connection()
 @st.cache_data
 def get_or_create_user(email: str):
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        # Buscar usuario existente
         cur.execute("SELECT user_id, credits FROM users WHERE email = %s", (email,))
         row = cur.fetchone()
         if row:
             return row["user_id"], row["credits"]
-        else:
+
+        # Si no existe, insertar y obtener el user_id generado
+        try:
             cur.execute(
                 "INSERT INTO users (email, credits) VALUES (%s, %s) RETURNING user_id, credits",
                 (email, 20)
             )
-            conn.commit()
-            return cur.fetchone()
+            row = cur.fetchone()  # primero obtenemos los datos
+            conn.commit()         # luego hacemos commit
+            return row["user_id"], row["credits"]
+        except psycopg2.Error:
+            conn.rollback()       # limpiar transacción si falla
+            raise
+
 
 def update_credits(user_id: str, amount: int, action_type: str):
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
