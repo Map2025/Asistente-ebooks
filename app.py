@@ -1,5 +1,4 @@
 import streamlit as st
-import uuid
 import psycopg2
 import psycopg2.extras
 import pandas as pd
@@ -8,25 +7,24 @@ from services.db_service import obtener_ebooks_disponibles, buscar_fragmentos
 from services.ebook_service import crear_docx
 from services.tts_service import reproducir_audio
 from utils.helpers import limpiar_estado
-from streamlit_cookies_manager import EncryptedCookieManager
 
 st.set_page_config(page_title="Asistente Inteligente ebooks de IA", layout="centered")
 
 # --------------------------
-# Configuración cookies para user_id persistente
+# Solicitar correo del usuario
 # --------------------------
-cookies = EncryptedCookieManager(prefix="ebooks_app_", password="clave-secreta-larga")
-if not cookies.ready():
-    st.stop()
+if "user_email" not in st.session_state:
+    email = st.text_input("✉️ Ingresa tu correo electrónico para usar el asistente:")
+    if email:
+        st.session_state["user_email"] = email.strip().lower()
+        st.rerun()
+    else:
+        st.stop()
 
-if "user_id" not in cookies:
-    cookies["user_id"] = str(uuid.uuid4())
-    cookies.save()
-
-user_id = cookies["user_id"]
+user_email = st.session_state["user_email"]
 
 # --------------------------
-# Conexión a Postgres usando DATABASE_URL y cacheando recurso
+# Conexión a Postgres
 # --------------------------
 @st.cache_resource
 def init_connection():
@@ -41,20 +39,21 @@ def init_connection():
     )
 
 conn = init_connection()
+
 # --------------------------
 # Funciones de control de créditos
 # --------------------------
 @st.cache_data
-def get_or_create_user(user_id: str):
+def get_or_create_user(email: str):
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-        cur.execute("SELECT user_id, credits FROM users WHERE user_id = %s", (user_id,))
+        cur.execute("SELECT user_id, credits FROM users WHERE email = %s", (email,))
         row = cur.fetchone()
         if row:
             return row["user_id"], row["credits"]
         else:
             cur.execute(
-                "INSERT INTO users (user_id, credits) VALUES (%s, %s) RETURNING user_id, credits",
-                (user_id, 20)
+                "INSERT INTO users (email, credits) VALUES (%s, %s) RETURNING user_id, credits",
+                (email, 20)
             )
             conn.commit()
             return cur.fetchone()
@@ -110,7 +109,7 @@ pregunta_key = "pregunta_input"
 # --------------------------
 # Obtener saldo actual
 # --------------------------
-user_id, credits = get_or_create_user(user_id)
+user_id, credits = get_or_create_user(user_email)
 if "credits" not in st.session_state:
     st.session_state["credits"] = credits
 st.sidebar.metric("💰 Créditos disponibles", st.session_state["credits"])
@@ -295,7 +294,7 @@ Separa títulos y subtítulos claramente.
     elif estado["paso"] == "generar_todos_capitulos":
         st.info("Generando todos los capítulos, esto puede tardar un poco...")
 
-        # 🔧 FIX: limpiar capítulos anteriores y dejar solo el índice
+        # Limpiar capítulos anteriores y dejar solo el índice
         estado["contenido"] = [item for item in estado["contenido"] if item["tipo"] == "indice"]
 
         indice = next((item['texto'] for item in estado["contenido"] if item['tipo'] == 'indice'), "")
@@ -329,11 +328,8 @@ Desarrolla el capítulo con subtítulos y ejemplos. Extensión mínima: 800 pala
             "completo": "Proceso finalizado. Recargá la página para crear otro ebook."
         }
         prompt = pregunta_ebook.get(estado["paso"])
-        if prompt:
+        if prompt and estado["paso"] not in ["generar_indice", "generar_todos_capitulos"]:
             respuesta = st.text_input(prompt, key="input_ebook")
-            if estado["paso"] == "pedir_titulo" and st.button("Cancelar creación de ebook"):
-                limpiar_estado()
-                st.rerun()
             if respuesta:
                 avanzar_ebook(respuesta)
                 st.rerun()
