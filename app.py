@@ -127,7 +127,7 @@ pregunta_key = "pregunta_input"
 # --------------------------
 # Obtener saldo actual
 # --------------------------
-user_id, credits = get_or_create_user(user_email)
+user_id, credits = get_or_create_user(user_email, conn)
 if "credits" not in st.session_state:
     st.session_state["credits"] = credits
 st.sidebar.metric("💰 Créditos disponibles", st.session_state["credits"])
