@@ -44,25 +44,35 @@ conn = init_connection()
 # Funciones de control de créditos
 # --------------------------
 @st.cache_data
-def get_or_create_user(email: str):
+def get_or_create_user(email: str, conn):
+    """
+    Busca un usuario por email. Si no existe, crea uno nuevo con user_id tipo UUID.
+    Devuelve: (user_id, credits)
+    """
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-        # Buscar usuario existente
+        # 1️⃣ Buscar usuario existente
         cur.execute("SELECT user_id, credits FROM users WHERE email = %s", (email,))
         row = cur.fetchone()
         if row:
             return row["user_id"], row["credits"]
 
-        # Si no existe, insertar y obtener el user_id generado
+        # 2️⃣ Usuario no existe: generar UUID
+        new_user_id = str(uuid.uuid4())
+
         try:
             cur.execute(
-                "INSERT INTO users (email, credits) VALUES (%s, %s) RETURNING user_id, credits",
-                (email, 20)
+                """
+                INSERT INTO users (user_id, email, credits)
+                VALUES (%s, %s, %s)
+                RETURNING user_id, credits
+                """,
+                (new_user_id, email, 20)
             )
-            row = cur.fetchone()  # primero obtenemos los datos
-            conn.commit()         # luego hacemos commit
+            row = cur.fetchone()  # obtener datos insertados
+            conn.commit()         # confirmar inserción
             return row["user_id"], row["credits"]
         except psycopg2.Error:
-            conn.rollback()       # limpiar transacción si falla
+            conn.rollback()       # limpiar si falla
             raise
 
 
