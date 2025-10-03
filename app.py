@@ -2,6 +2,7 @@ import streamlit as st
 import psycopg2
 import psycopg2.extras
 import pandas as pd
+import uuid
 from services.openai_service import generar_texto_openai, generar_embedding
 from services.db_service import obtener_ebooks_disponibles, buscar_fragmentos
 from services.ebook_service import crear_docx
