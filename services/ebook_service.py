@@ -1,5 +1,6 @@
 # ebook_service.py
 import os
+import html   # 🔹 IMPORTADO para limpieza de entidades HTML
 from docx import Document
 
 def crear_docx(contenido, archivo_base: str = "ebook_generado.docx") -> str:
@@ -25,6 +26,9 @@ def crear_docx(contenido, archivo_base: str = "ebook_generado.docx") -> str:
     # --- Añadir índice ---
     indice = next((item['texto'] for item in contenido if item['tipo'] == 'indice'), None)
     if indice:
+        # 🔹 LIMPIEZA DE ENTIDADES HTML
+        indice = html.unescape(indice)
+
         doc.add_page_break()
         doc.add_heading("Índice", level=1)
         for linea in indice.split('\n'):
@@ -38,14 +42,16 @@ def crear_docx(contenido, archivo_base: str = "ebook_generado.docx") -> str:
     for item in sorted(contenido, key=lambda x: x.get("numero", 0)):
         if item["tipo"] == "capitulo":
             doc.add_heading(f"Capítulo {item['numero']}", level=1)
-            for parrafo in item["texto"].split('\n\n'):
+            # 🔹 LIMPIEZA DE ENTIDADES HTML por capítulo
+            texto_capitulo = html.unescape(item["texto"])
+            for parrafo in texto_capitulo.split('\n\n'):
                 if parrafo.strip():
                     doc.add_paragraph(parrafo.strip())
             doc.add_page_break()
+
     # Guardar archivo actualizado
     script_dir = os.path.dirname(os.path.abspath(__file__))
     archivo_actualizado = os.path.join(script_dir, "ebook_actualizado.docx")
     doc.save(archivo_actualizado)
 
     return archivo_actualizado
-
