@@ -3,6 +3,7 @@ import psycopg2
 import psycopg2.extras
 import pandas as pd
 import uuid
+import os
 from services.openai_service import generar_texto_openai, generar_embedding
 from services.db_service import obtener_ebooks_disponibles, buscar_fragmentos
 from services.ebook_service import crear_docx
@@ -286,10 +287,13 @@ elif st.session_state.modo == "ebook":
                 st.warning("Responde sí o no.")
         elif current_paso == "finalizar":
             if respuesta.lower() in ["sí", "si", "s"]:
-                archivo = crear_docx(estado["contenido"], estado["datos"]["titulo"])
+                # 🔹 CAMBIO: Guardar la ruta completa devuelta por crear_docx
+                archivo_base = "ebook_generado.docx"  # Archivo existente con la portada
+                archivo_actualizado = crear_docx(estado["contenido"], archivo_base)
                 estado["archivo_creado"] = True
+                estado["archivo_actualizado"] = archivo_actualizado  # 🔹 CAMBIO
                 estado["paso"] = "completo"
-                st.success(f"Ebook generado: {archivo}")
+                st.success(f"Ebook generado: {archivo_actualizado}")
             else:
                 st.info("Proceso finalizado sin crear archivo.")
                 estado["paso"] = "completo"
@@ -353,12 +357,12 @@ Desarrolla el capítulo con subtítulos y ejemplos. Extensión mínima: 800 pala
                 avanzar_ebook(respuesta)
                 st.rerun()
 
-    # Descargar ebook
-    if estado.get("archivo_creado"):
-        with open("ebook_generado.docx", "rb") as f:
+    # 🔹 CAMBIO: Descargar ebook solo si se generó realmente y la ruta existe
+    if estado.get("archivo_creado") and os.path.exists(estado.get("archivo_actualizado", "")):
+        with open(estado["archivo_actualizado"], "rb") as f:
             st.download_button(
                 label="Descargar ebook generado",
                 data=f,
-                file_name="ebook_generado.docx",
+                file_name="ebook_actualizado.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
