@@ -28,3 +28,5 @@ pandas==2.1.0
 streamlit-cookies-manager
 
 pyarrow
+
+pillow
